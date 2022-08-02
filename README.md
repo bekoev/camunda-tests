@@ -30,23 +30,9 @@ As per <https://docs.camunda.io/docs/components/modeler/desktop-modeler/install-
     * Note in the output something similar to:
 
         ```
-		Zeebe gateway topology response:
-		brokers {
-		  host: "172.17.0.2"
-		  port: 26501
-		  partitions {
-			partitionId: 1
-		  }
-		  version: "8.0.4"
-		}
-		clusterSize: 1
-		partitionsCount: 1
-		replicationFactor: 1
-		gatewayVersion: "8.0.4"
-
-		Looking for some "echo" jobs...
-		Got a job with ID=Activity_10jeepw
-		Job Completed
+        Looking for some "echo" jobs...
+        Got a job with ID=Activity_10jeepw
+        Job Completed
         ```
 1. From Modeler, start the diagram again and note another "Got a job ... Job Completed" pair in the terminal.
 1. In the terminal window, interrupt the execution (`^C`).

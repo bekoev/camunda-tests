@@ -1,40 +1,67 @@
 import asyncio
-import grpc.aio
 import json
+
+import grpc.aio
 from zeebe_grpc import gateway_pb2
 from zeebe_grpc import gateway_pb2_grpc
 
 
-async def run():
-    async with grpc.aio.insecure_channel('localhost:26500') as channel:
-        gateway = gateway_pb2_grpc.GatewayStub(channel)
-        topologyResponse = await gateway.Topology(gateway_pb2.TopologyRequest())  # noqa
-        print(f'Zeebe gateway topology response:\n{topologyResponse}')
+class Task():
+    def __init__(self, type, impl) -> None:
+        self.type = type
+        self.impl = impl
 
-        print('Looking for some "echo" jobs...')
+
+class Worker():
+    def __init__(self, channel: grpc.aio.Channel) -> None:
+        self._gateway = gateway_pb2_grpc.GatewayStub(channel)
+        self._tasks = []
+
+    def task(self, type):
+        def task_wrapper(task_impl):
+            self._tasks.append(Task(type, task_impl))
+        return task_wrapper
+
+    async def work(self):
         while True:
-            activate_jobs_response = gateway.ActivateJobs(
-                gateway_pb2.ActivateJobsRequest(
-                    type="echo",
-                    worker="Python worker",
-                    timeout=60_000,
-                    maxJobsToActivate=32,
-                    requestTimeout=60_000,  # Enable long polling
+            for task in self._tasks:
+                print(f'Looking for some "{task.type}" jobs...')
+                activate_jobs_response = self._gateway.ActivateJobs(
+                    gateway_pb2.ActivateJobsRequest(
+                        type=task.type,
+                        worker='Python worker',
+                        timeout=60_000,
+                        maxJobsToActivate=32,
+                        requestTimeout=60_000,  # Enable long polling
+                    )
                 )
-            )
-            async for response in activate_jobs_response:
-                for job in response.jobs:
-                    try:
-                        print(f'Got a job with ID={job.elementId}')
-                        await gateway.CompleteJob(
-                            gateway_pb2.CompleteJobRequest(
-                                jobKey=job.key,
-                                variables=json.dumps({})))
-                        print("Job Completed")
-                    except Exception as e:
-                        await gateway.FailJob(gateway_pb2.FailJobRequest(jobKey=job.key))  # noqa
-                        print(f"Job Failed {e}")
+                async for response in activate_jobs_response:
+                    # TODO: Improve async jobs being executed synchronously
+                    for job in response.jobs:
+                        try:
+                            result = await task.impl(job)
+                            await self._gateway.CompleteJob(
+                                gateway_pb2.CompleteJobRequest(
+                                    jobKey=job.key,
+                                    variables=json.dumps(result)))
+                            print('Job Completed')
+                        except Exception as e:
+                            await self._gateway.FailJob(gateway_pb2.FailJobRequest(jobKey=job.key))  # noqa
+                            print(f'Job Failed {e}')
+
+
+channel = grpc.aio.insecure_channel('localhost:26500')  # TODO: check shutdown  # noqa
+worker = Worker(channel)
+
+
+@worker.task(type='echo')
+async def echo_job(job):
+    print(f'Got a job with ID={job.elementId}')
+    await asyncio.sleep(2)
+    return {}
 
 
 if __name__ == '__main__':
-    asyncio.run(run())
+    # Workaround, https://github.com/camunda-community-hub/pyzeebe/issues/239
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(worker.work())
