@@ -1,40 +1,76 @@
-import asyncio
-import grpc.aio
+from typing import Callable
+import grpc
 import json
 from zeebe_grpc import gateway_pb2
 from zeebe_grpc import gateway_pb2_grpc
 
 
-async def run():
-    async with grpc.aio.insecure_channel('localhost:26500') as channel:
-        gateway = gateway_pb2_grpc.GatewayStub(channel)
-        topologyResponse = await gateway.Topology(gateway_pb2.TopologyRequest())  # noqa
-        print(f'Zeebe gateway topology response:\n{topologyResponse}')
+class Task():
+    def __init__(self, type: str, impl: Callable) -> None:
+        self.type = type
+        self.impl = impl
 
-        print('Looking for some "echo" jobs...')
+
+class WorkerSync():
+    def __init__(self, channel: grpc.Channel) -> None:
+        self._gateway = gateway_pb2_grpc.GatewayStub(channel)
+        self._tasks = []
+        self._topo_formatters = []
+
+    def task(self, type: str):
+        def task_wrapper(task_impl):
+            self._tasks.append(Task(type, task_impl))
+        return task_wrapper
+
+    def topo_handler(self):
+        def topo_handler_impl(f: Callable):
+            self._topo_formatters.append(f)
+        return topo_handler_impl
+
+    def work(self) -> None:
+        topology = self._gateway.Topology(gateway_pb2.TopologyRequest())
+        for topo_formatter in self._topo_formatters:
+            topo_formatter(topology)
+
         while True:
-            activate_jobs_response = gateway.ActivateJobs(
-                gateway_pb2.ActivateJobsRequest(
-                    type="echo",
-                    worker="Python worker",
-                    timeout=60_000,
-                    maxJobsToActivate=32,
-                    requestTimeout=60_000,  # Enable long polling
+            for task in self._tasks:
+                activate_jobs_response = self._gateway.ActivateJobs(
+                    gateway_pb2.ActivateJobsRequest(
+                        type=task.type,
+                        worker='Python worker',
+                        timeout=60_000,
+                        maxJobsToActivate=32,
+                        requestTimeout=60_000,  # Enable long polling
+                    )
                 )
-            )
-            async for response in activate_jobs_response:
-                for job in response.jobs:
-                    try:
-                        print(f'Got a job with ID={job.elementId}')
-                        await gateway.CompleteJob(
-                            gateway_pb2.CompleteJobRequest(
-                                jobKey=job.key,
-                                variables=json.dumps({})))
-                        print("Job Completed")
-                    except Exception as e:
-                        await gateway.FailJob(gateway_pb2.FailJobRequest(jobKey=job.key))  # noqa
-                        print(f"Job Failed {e}")
+                for response in activate_jobs_response:
+                    for job in response.jobs:
+                        try:
+                            task.impl(job)
+                            self._gateway.CompleteJob(
+                                gateway_pb2.CompleteJobRequest(
+                                    jobKey=job.key,
+                                    variables=json.dumps({})))
+                            print('Job Completed')
+                        except Exception as e:
+                            self._gateway.FailJob(
+                                gateway_pb2.FailJobRequest(jobKey=job.key))
+                            print(f'Job Failed {e}')
+
+
+channel = grpc.insecure_channel('localhost:26500')  # TODO: check greaceful shutdown # noqa
+worker = WorkerSync(channel)
+
+
+@worker.topo_handler()  # TODO: get rid of ()
+def print_all(topology):
+    print(f'Zeebe gateway topology response:\n{topology}')
+
+
+@worker.task(type='echo')
+def echo(job):
+    print(f'Got a job with ID={job.elementId}')
 
 
 if __name__ == '__main__':
-    asyncio.run(run())
+    worker.work()
