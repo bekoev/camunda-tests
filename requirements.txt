@@ -1,1 +1,1 @@
-zeebe-grpc==8.0.4
+pyzeebe==3.0.4  # note this would install zeebe-grpc of v. 1.3.7 (would downgrade is existed)
