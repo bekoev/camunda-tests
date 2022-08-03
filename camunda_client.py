@@ -18,14 +18,12 @@ class WorkerSync():
         self._topo_formatters = []
 
     def task(self, type: str):
-        def task_wrapper(task_impl):
+        def task_wrapper(task_impl: Callable):
             self._tasks.append(Task(type, task_impl))
         return task_wrapper
 
-    def topo_handler(self):
-        def topo_handler_impl(f: Callable):
-            self._topo_formatters.append(f)
-        return topo_handler_impl
+    def topo_handler(self, f: Callable):
+        self._topo_formatters.append(f)
 
     def work(self) -> None:
         topology = self._gateway.Topology(gateway_pb2.TopologyRequest())
@@ -62,7 +60,7 @@ channel = grpc.insecure_channel('localhost:26500')  # TODO: check greaceful shut
 worker = WorkerSync(channel)
 
 
-@worker.topo_handler()  # TODO: get rid of ()
+@worker.topo_handler
 def print_all(topology):
     print(f'Zeebe gateway topology response:\n{topology}')
 
