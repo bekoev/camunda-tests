@@ -1,14 +1,15 @@
-from typing import Callable
-import grpc
 import json
-from zeebe_grpc import gateway_pb2
-from zeebe_grpc import gateway_pb2_grpc
+from dataclasses import dataclass
+from typing import Callable
+
+import grpc
+from zeebe_grpc import gateway_pb2, gateway_pb2_grpc
 
 
+@dataclass(frozen=True)
 class Task():
-    def __init__(self, type: str, impl: Callable) -> None:
-        self.type = type
-        self.impl = impl
+    type: str
+    impl: Callable
 
 
 class WorkerSync():
