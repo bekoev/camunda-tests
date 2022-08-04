@@ -20,10 +20,12 @@ class WorkerSync():
     def task(self, type: str):
         def task_wrapper(task_impl: Callable):
             self._tasks.append(Task(type, task_impl))
+            return task_impl
         return task_wrapper
 
     def topo_handler(self, f: Callable):
         self._topo_formatters.append(f)
+        return f
 
     def work(self) -> None:
         topology = self._gateway.Topology(gateway_pb2.TopologyRequest())
